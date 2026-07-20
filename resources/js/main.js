@@ -26,6 +26,68 @@
     els.forEach(function (el) { io.observe(el); });
   }
 
+  /* ---------- 누적 보상 그래프: 선 드로잉 + 마커 순차 등장 ---------- */
+  function initRewardGraph() {
+    var chart = document.querySelector('.rg-chart');
+    if (!chart) return;
+    var line = chart.querySelector('.rg-line');
+    var revealRect = chart.querySelector('.rg-reveal-rect');
+    var spots = Array.prototype.slice.call(chart.querySelectorAll('[data-x]'));
+    if (!line || !spots.length) return;
+
+    var total = line.getTotalLength();
+    line.style.strokeDasharray = total;
+    line.style.strokeDashoffset = total;
+
+    function lengthAtX(targetX) {
+      var lo = 0, hi = total;
+      for (var i = 0; i < 24; i++) {
+        var mid = (lo + hi) / 2;
+        if (line.getPointAtLength(mid).x < targetX) lo = mid; else hi = mid;
+      }
+      return (lo + hi) / 2;
+    }
+
+    spots.forEach(function (el) {
+      var x = parseFloat(el.getAttribute('data-x'));
+      el._rgFraction = isNaN(x) ? 1 : lengthAtX(x) / total;
+    });
+
+    var DURATION = 1700;
+    var played = false;
+
+    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+    function play() {
+      if (played) return;
+      played = true;
+      var start = null;
+      function step(ts) {
+        if (start === null) start = ts;
+        var t = Math.min(1, (ts - start) / DURATION);
+        var eased = easeOutCubic(t);
+        line.style.strokeDashoffset = total * (1 - eased);
+        if (revealRect) revealRect.setAttribute('width', line.getPointAtLength(total * eased).x);
+        spots.forEach(function (el) {
+          if (eased >= el._rgFraction) el.classList.add('is-visible');
+        });
+        if (t < 1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    }
+
+    if ('IntersectionObserver' in window) {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { play(); io.unobserve(e.target); }
+        });
+      }, { threshold: 0.16, rootMargin: '0px 0px -8% 0px' });
+      io.observe(chart);
+    } else {
+      play();
+    }
+  }
+
   /* ---------- 참여방법 탭 ---------- */
   function initTabs() {
     var btns = document.querySelectorAll('.tabs__btn');
@@ -94,24 +156,6 @@
 "float hmn=lerp(h0mn,h1mn,d),smn=lerp(s0mn,s1mn,d),vmn=lerp(v0mn,v1mn,d);",
 "float hmx=lerp(h0mx,h1mx,d),smx=lerp(s0mx,s1mx,d),vmx=lerp(v0mx,v1mx,d);",
 "vec3 color=hsv2rgb(lerp(hmn,hmx,nv),lerp(smn,smx,nv),lerp(vmn,vmx,nv));",
-"gl_FragColor=vec4(color,1.);}"
-    ].join("\n");
-    mountShader(host, FRAG);
-  }
-
-  /* 섹션 — 화이트 안개 (KV 제외) */
-  function initWhiteFog(hostId) {
-    var host = document.getElementById(hostId);
-    if (!host) return;
-    var FRAG = SNOISE + "\n" + [
-"void main(){",
-"vec2 d1=vec2(snoise(gl_FragCoord.xy/150.0+vec2(u_time*.3,u_time*.4)),snoise(gl_FragCoord.xy/150.0+vec2(3.+u_time*.4,4.+u_time*.3)));",
-"vec2 ds=gl_FragCoord.xy/600.+d1*0.2;",
-"vec2 d2=vec2(snoise(ds+vec2(u_time*-.01,u_time*-.02)),snoise(ds+vec2(3.+u_time*-.02,4.+u_time*-.3)));",
-"vec2 ds2=gl_FragCoord.xy/600.+d2*0.2;",
-"float nv=(snoise(ds2+vec2(u_time*-0.05,u_time*0.05))+1.)/2.;",
-"float dens=smoothstep(0.25,0.9,nv);",
-"vec3 color=vec3(1.0)*dens;",
 "gl_FragColor=vec4(color,1.);}"
     ].join("\n");
     mountShader(host, FRAG);
@@ -187,9 +231,9 @@
   /* ---------- init ---------- */
   function init() {
     initReveal();
+    initRewardGraph();
     initTabs();
     initHeroFog();
-    ['s2-shader', 's3-shader', 's4-shader', 's5-shader', 's6-shader'].forEach(initWhiteFog);
     initSparks('hero-sparks', ['80,220,120', '140,255,170', '40,170,90']);
     initParallax();
   }
